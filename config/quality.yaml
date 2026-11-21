@@ -1,0 +1,48 @@
+# Data quality contract per canonical entity, enforced between bronze and silver.
+#
+# severity:
+#   error       -> fail the run (a broken contract; never publish bad numbers)
+#   quarantine  -> row goes to <entity>_quarantine with the failed rule names; the rest flows
+#   warn        -> recorded in the DQ log only
+#
+# Referential integrity (booking -> member) is handled in code as a quarantine that is
+# RETRIED on every run, because on-prem replication lag means a booking can arrive before
+# its member (late-arriving dimension).
+
+members:
+  - name: member_id_present
+    expr: "member_natural_id IS NOT NULL"
+    severity: error
+  - name: modified_at_parsed
+    expr: "modified_at IS NOT NULL"
+    severity: error
+  - name: email_format            # bad email != bad member: keep the member, flag the email
+    expr: "email IS NULL OR email RLIKE '^[^@\\\\s]+@[^@\\\\s]+\\\\.[^@\\\\s]+$'"
+    severity: warn
+  - name: country_known           # can't decide consent jurisdiction -> hold the record
+    expr: "country IS NOT NULL"
+    severity: quarantine
+  - name: tier_mapped
+    expr: "tier IS NOT NULL"
+    severity: warn
+
+bookings:
+  - name: booking_id_present
+    expr: "booking_natural_id IS NOT NULL"
+    severity: error
+  - name: amount_non_negative
+    expr: "amount_local >= 0"
+    severity: quarantine
+  - name: currency_supported
+    expr: "currency IN ('USD','EUR','GBP','CAD','MXN')"
+    severity: quarantine
+  - name: product_type_mapped
+    expr: "product_type IS NOT NULL"
+    severity: quarantine
+  - name: travel_after_booking
+    expr: "travel_date IS NULL OR booking_date IS NULL OR travel_date >= booking_date"
+    severity: quarantine
+
+# Batch-level volume guard: alert when a batch is wildly off the running average.
+volume:
+  max_ratio_vs_average: 5.0

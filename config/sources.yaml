@@ -1,0 +1,129 @@
+# Metadata-driven ingestion + conformance.
+#
+# Every partner runs its own on-prem database with its own schema. Onboarding a new
+# partner is a config change: add an entry here (extract + canonical mapping) and the
+# same bronze/silver code handles it. No partner-specific Python.
+#
+# extract:   how bronze pulls incrementally (watermark column, compared with >=,
+#            i.e. at-least-once; silver is idempotent so overlap is harmless)
+# canonical: Spark SQL expressions that map raw (all-string) bronze columns to the
+#            canonical silver contract
+
+partners:
+  BHB:
+    name: BlueHarbor Bank Rewards
+    database: onprem/bhb.sqlite
+    tables:
+      - source_table: Members
+        entity: members
+        watermark_column: ModifiedDate
+        canonical:
+          member_natural_id: "MemberID"
+          first_name: "FirstName"
+          last_name: "LastName"
+          email: "EmailAddress"
+          phone: "Phone"
+          country: "Country"
+          state: "State"
+          tier: "CASE TierCode WHEN 'B' THEN 'BASIC' WHEN 'S' THEN 'SILVER' WHEN 'G' THEN 'GOLD' WHEN 'P' THEN 'PLATINUM' END"
+          created_at: "to_timestamp(CreatedDate, 'yyyy-MM-dd HH:mm:ss')"
+          modified_at: "to_timestamp(ModifiedDate, 'yyyy-MM-dd HH:mm:ss')"
+      - source_table: Bookings
+        entity: bookings
+        watermark_column: ModifiedDate
+        canonical:
+          booking_natural_id: "BookingID"
+          member_natural_id: "MemberID"
+          product_type: "upper(ProductType)"
+          destination: "DestinationCode"
+          booking_date: "to_date(BookingDate, 'yyyy-MM-dd')"
+          travel_date: "to_date(TravelDate, 'yyyy-MM-dd')"
+          amount_local: "cast(Amount_USD as decimal(12,2))"
+          currency: "'USD'"
+          status: "upper(Status)"
+          modified_at: "to_timestamp(ModifiedDate, 'yyyy-MM-dd HH:mm:ss')"
+
+  SAM:
+    name: Summit Airlines Miles
+    database: onprem/sam.sqlite
+    tables:
+      - source_table: customer
+        entity: members
+        watermark_column: updated_at
+        canonical:
+          member_natural_id: "cust_id"
+          first_name: "element_at(split(full_name, ' '), 1)"
+          last_name: "element_at(split(full_name, ' '), -1)"
+          email: "email"
+          phone: "phone_number"
+          country: "upper(country_iso)"
+          state: "region"
+          tier: "CASE lower(loyalty_level) WHEN 'blue' THEN 'BASIC' WHEN 'silver' THEN 'SILVER' WHEN 'gold' THEN 'GOLD' WHEN 'diamond' THEN 'PLATINUM' END"
+          created_at: "to_timestamp(created_at, \"yyyy-MM-dd'T'HH:mm:ss'Z'\")"
+          modified_at: "to_timestamp(updated_at, \"yyyy-MM-dd'T'HH:mm:ss'Z'\")"
+      - source_table: reservation
+        entity: bookings
+        watermark_column: updated_at
+        canonical:
+          booking_natural_id: "res_id"
+          member_natural_id: "cust_id"
+          product_type: "CASE lower(category) WHEN 'cruise' THEN 'CRUISE' WHEN 'hotel' THEN 'HOTEL' WHEN 'car' THEN 'CAR' WHEN 'air' THEN 'FLIGHT' END"
+          destination: "dest"
+          booking_date: "to_date(booked_on)"
+          travel_date: "to_date(depart_on)"
+          amount_local: "cast(cast(total_cents as bigint) / 100 as decimal(12,2))"
+          currency: "upper(currency)"
+          status: "CASE lower(state) WHEN 'ok' THEN 'CONFIRMED' WHEN 'cxl' THEN 'CANCELLED' WHEN 'done' THEN 'COMPLETED' END"
+          modified_at: "to_timestamp(updated_at, \"yyyy-MM-dd'T'HH:mm:ss'Z'\")"
+
+  NWCU:
+    name: Northwind Credit Union
+    database: onprem/nwcu.sqlite
+    tables:
+      - source_table: mbr
+        entity: members
+        watermark_column: last_upd_ts
+        canonical:
+          member_natural_id: "mbr_no"
+          first_name: "initcap(nm_first)"
+          last_name: "initcap(nm_last)"
+          email: "email_addr"
+          phone: "CAST(NULL AS STRING)"
+          country: "CASE cntry WHEN 'USA' THEN 'US' WHEN 'CAN' THEN 'CA' WHEN 'MEX' THEN 'MX' WHEN 'GBR' THEN 'GB' WHEN 'DEU' THEN 'DE' WHEN 'FRA' THEN 'FR' END"
+          state: "st"
+          tier: "CASE segment WHEN 'STD' THEN 'BASIC' WHEN 'PRF' THEN 'GOLD' WHEN 'PRV' THEN 'PLATINUM' END"
+          created_at: "to_timestamp(open_dt, 'yyyyMMdd')"
+          modified_at: "to_timestamp(last_upd_ts, 'yyyyMMddHHmmss')"
+      - source_table: trips
+        entity: bookings
+        watermark_column: last_upd_ts
+        canonical:
+          booking_natural_id: "trip_no"
+          member_natural_id: "mbr_no"
+          product_type: "CASE trip_type WHEN 'C' THEN 'CRUISE' WHEN 'H' THEN 'HOTEL' WHEN 'R' THEN 'CAR' WHEN 'A' THEN 'FLIGHT' END"
+          destination: "dest_cd"
+          booking_date: "to_date(book_dt, 'yyyyMMdd')"
+          travel_date: "to_date(travel_dt, 'yyyyMMdd')"
+          amount_local: "cast(amt as decimal(12,2))"
+          currency: "'USD'"
+          status: "CASE status_cd WHEN 'A' THEN 'CONFIRMED' WHEN 'X' THEN 'CANCELLED' WHEN 'C' THEN 'COMPLETED' END"
+          modified_at: "to_timestamp(last_upd_ts, 'yyyyMMddHHmmss')"
+
+# File-based sources landed by SaaS marketing tools (Marketo-style activity export)
+file_sources:
+  marketing_engagement:
+    landing: landing/marketing
+    format: json
+
+# Streaming source (Event Hubs / Fabric Eventstream in production; a landing folder here)
+streams:
+  consent_events:
+    landing: landing/consent_events
+
+# Reference data
+fx_to_usd:
+  USD: 1.0
+  EUR: 1.08
+  GBP: 1.27
+  CAD: 0.73
+  MXN: 0.055

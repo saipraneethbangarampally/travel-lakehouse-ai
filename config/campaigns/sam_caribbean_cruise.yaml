@@ -1,0 +1,10 @@
+# Marketing writes this; the platform enforces consent and partner isolation.
+campaign_id: SAM-CRZ-CARIB-27Q1
+partner_code: SAM
+channel: email
+description: Winter Caribbean cruise push for members who already like cruising.
+criteria:
+  min_cruise_affinity: 0.3
+  value_segments: [MID, HIGH]
+  max_days_since_last_booking: 730
+  exclude_upcoming_trips: true     # don't sell a cruise to someone about to travel

@@ -1,0 +1,8 @@
+campaign_id: BHB-CRZ-ALASKA-27Q2
+partner_code: BHB
+channel: email
+description: Alaska cruise early-bird for engaged, higher-tier members.
+criteria:
+  tiers: [SILVER, GOLD, PLATINUM]
+  min_cruise_affinity: 0.2
+  min_email_opens_90d: 1

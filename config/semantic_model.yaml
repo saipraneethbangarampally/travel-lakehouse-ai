@@ -1,0 +1,177 @@
+# THE semantic layer: one set of definitions for Power BI, governance and AI agents.
+#
+# - descriptions  -> Power BI semantic model descriptions AND the context an LLM gets
+# - classification-> Purview sensitivity labels, masking for analysts, removal for AI
+# - metrics       -> the only aggregations an agent can run (no free-form SQL)
+#
+# Classifications: public < internal < confidential < pii
+
+datasets:
+  fact_booking:
+    description: One row per travel booking across all partners, latest status. Amounts normalised to USD.
+    grain: booking
+    ai_exposed: true
+    columns:
+      booking_key:        {type: string, classification: internal, description: Surrogate key for the booking (hash of partner + source id).}
+      booking_natural_id: {type: string, classification: internal, description: Booking id in the partner's source system.}
+      partner_code:       {type: string, classification: internal, description: "White-label partner brand: BHB, SAM or NWCU."}
+      member_key:         {type: string, classification: confidential, description: Pseudonymous member id. Not a direct identifier but must not be exported.}
+      member_sk:          {type: string, classification: confidential, description: SCD2 version of the member at booking time.}
+      tier_at_booking:    {type: string, classification: internal, description: Loyalty tier the member held on the booking date (point-in-time).}
+      product_type:       {type: string, classification: public, description: "CRUISE, HOTEL, CAR or FLIGHT."}
+      destination:        {type: string, classification: public, description: Destination code.}
+      booking_date:       {type: date, classification: internal, description: Date the booking was made.}
+      travel_date:        {type: date, classification: internal, description: Departure / check-in date.}
+      amount_usd:         {type: decimal, classification: internal, description: Booking value in USD (converted with reference FX).}
+      status:             {type: string, classification: internal, description: "CONFIRMED, CANCELLED or COMPLETED."}
+      is_cancelled:       {type: boolean, classification: internal, description: True when status is CANCELLED.}
+
+  member_360:
+    description: One row per current member with booking and engagement features as of the as_of_date. Feeds audiences and AI.
+    grain: member (current version)
+    ai_exposed: true
+    columns:
+      member_key:              {type: string, classification: confidential, description: Pseudonymous member id.}
+      partner_code:            {type: string, classification: internal, description: Partner brand.}
+      tier:                    {type: string, classification: internal, description: Current loyalty tier.}
+      country:                 {type: string, classification: internal, description: ISO-2 country of residence.}
+      state:                   {type: string, classification: internal, description: State / region code.}
+      total_bookings:          {type: int, classification: internal, description: Non-cancelled bookings, all time.}
+      lifetime_value_usd:      {type: decimal, classification: internal, description: Sum of non-cancelled booking value in USD.}
+      cruise_bookings:         {type: int, classification: internal, description: Non-cancelled cruise bookings.}
+      hotel_bookings:          {type: int, classification: internal, description: Non-cancelled hotel bookings.}
+      last_booking_date:       {type: date, classification: internal, description: Most recent booking date.}
+      days_since_last_booking: {type: int, classification: internal, description: Days between last booking and as_of_date.}
+      upcoming_trips:          {type: int, classification: internal, description: Confirmed bookings travelling on/after as_of_date.}
+      email_opens_90d:         {type: int, classification: internal, description: Email opens in the last 90 days.}
+      email_clicks_90d:        {type: int, classification: internal, description: Email clicks in the last 90 days.}
+      cruise_clicks_180d:      {type: int, classification: internal, description: Clicks on cruise campaigns in the last 180 days.}
+      cruise_affinity:         {type: double, classification: internal, description: "0-1 explainable score: 0.5 x cruise history + 0.3 x recent cruise clicks + 0.2 x booked in last year."}
+      value_segment:           {type: string, classification: internal, description: "LTV band: HIGH >= $8k, MID >= $2.5k, LOW otherwise."}
+      is_email_marketable:     {type: boolean, classification: internal, description: Consent decision from member_contactability.}
+      as_of_date:              {type: date, classification: public, description: Snapshot date for all relative features.}
+
+  fact_email_engagement:
+    description: Marketing email activity (send/open/click/unsubscribe) from the marketing platform, resolved to members.
+    grain: activity event
+    ai_exposed: true
+    columns:
+      event_id:         {type: string, classification: internal, description: Activity id from the marketing tool.}
+      partner_code:     {type: string, classification: internal, description: Partner brand.}
+      member_key:       {type: string, classification: confidential, description: Pseudonymous member id (null for prospects).}
+      campaign_id:      {type: string, classification: internal, description: Campaign identifier.}
+      campaign_product: {type: string, classification: public, description: Product the campaign promotes.}
+      activity_type:    {type: string, classification: internal, description: "send, open, click or unsubscribe."}
+      activity_ts:      {type: timestamp, classification: internal, description: Event time (UTC).}
+      activity_date:    {type: date, classification: internal, description: Event date (UTC).}
+      is_known_member:  {type: boolean, classification: internal, description: True when the email matched a current member.}
+
+  member_contactability:
+    description: Per-member email consent decision with the reason a member is suppressed.
+    grain: member (current version)
+    ai_exposed: false
+    columns:
+      member_key:          {type: string, classification: confidential, description: Pseudonymous member id.}
+      partner_code:        {type: string, classification: internal, description: Partner brand.}
+      country:             {type: string, classification: internal, description: Country used to pick the consent model.}
+      consent_model:       {type: string, classification: internal, description: "opt_in (GDPR/CASL) or opt_out (CAN-SPAM)."}
+      email_consent:       {type: string, classification: confidential, description: "Latest consent: opt_in, opt_out or unknown."}
+      consent_ts:          {type: timestamp, classification: confidential, description: When the latest consent event happened.}
+      consent_source:      {type: string, classification: internal, description: System that captured the consent.}
+      is_email_marketable: {type: boolean, classification: internal, description: Whether email marketing is allowed.}
+      suppression_reason:  {type: string, classification: internal, description: Why the member cannot be emailed (null if marketable).}
+
+  dim_member:
+    description: SCD Type 2 member dimension (one row per version). Contains direct identifiers.
+    grain: member version
+    ai_exposed: false
+    columns:
+      member_sk:         {type: string, classification: confidential, description: Version surrogate key.}
+      member_key:        {type: string, classification: confidential, description: Pseudonymous member id.}
+      partner_code:      {type: string, classification: internal, description: Partner brand.}
+      member_natural_id: {type: string, classification: confidential, description: Id in the partner system.}
+      first_name:        {type: string, classification: pii, description: First name.}
+      last_name:         {type: string, classification: pii, description: Last name.}
+      email:             {type: string, classification: pii, description: Email address (normalised).}
+      phone:             {type: string, classification: pii, description: Phone number.}
+      email_is_valid:    {type: boolean, classification: internal, description: Email passed format validation.}
+      tier:              {type: string, classification: internal, description: Loyalty tier for this version.}
+      country:           {type: string, classification: internal, description: Country for this version.}
+      state:             {type: string, classification: internal, description: State for this version.}
+      valid_from:        {type: timestamp, classification: internal, description: Version start (1900-01-01 for first known version).}
+      valid_to:          {type: timestamp, classification: internal, description: Version end (null = current).}
+      is_current:        {type: boolean, classification: internal, description: True for the current version.}
+
+metrics:
+  bookings:
+    description: Number of non-cancelled bookings.
+    dataset: fact_booking
+    agg: count
+    where: "is_cancelled == False"
+  gross_booking_value_usd:
+    description: Sum of non-cancelled booking value in USD.
+    dataset: fact_booking
+    agg: sum
+    column: amount_usd
+    where: "is_cancelled == False"
+  avg_booking_value_usd:
+    description: Average non-cancelled booking value in USD.
+    dataset: fact_booking
+    agg: mean
+    column: amount_usd
+    where: "is_cancelled == False"
+  cancellation_rate:
+    description: Cancelled bookings / all bookings.
+    dataset: fact_booking
+    agg: ratio
+    numerator_where: "is_cancelled == True"
+  active_members:
+    description: Members with a booking in the last 365 days.
+    dataset: member_360
+    agg: count
+    where: "days_since_last_booking <= 365"
+  marketable_members:
+    description: Members who may receive marketing email right now (consent-aware).
+    dataset: member_360
+    agg: count
+    where: "is_email_marketable == True"
+  email_open_rate:
+    description: Opens / sends.
+    dataset: fact_email_engagement
+    agg: ratio
+    numerator_where: "activity_type == 'open'"
+    denominator_where: "activity_type == 'send'"
+  email_click_rate:
+    description: Clicks / sends.
+    dataset: fact_email_engagement
+    agg: ratio
+    numerator_where: "activity_type == 'click'"
+    denominator_where: "activity_type == 'send'"
+
+# Dimensions an agent may group or filter by (derived ones are computed by the server).
+dimensions:
+  fact_booking: [partner_code, product_type, destination, tier_at_booking, status, booking_month, booking_year]
+  member_360: [partner_code, tier, country, value_segment]
+  fact_email_engagement: [partner_code, campaign_id, campaign_product, activity_month]
+
+roles:
+  analyst:
+    pii: mask            # visible but masked (dynamic data masking)
+    confidential: allow
+    row_level: partner
+  marketing_ops:
+    pii: allow           # needed to activate an approved audience
+    confidential: allow
+    row_level: partner
+  ai_agent:
+    pii: deny            # column never reaches the agent
+    confidential: deny
+    row_level: partner
+    aggregates_only: true
+    min_group_size: 10   # k-anonymity: smaller groups are suppressed
+
+principals:
+  "agent:data-copilot":        {role: ai_agent, partners: ["*"]}
+  "agent:sam-marketing-copilot": {role: ai_agent, partners: [SAM]}
+  "user:analyst.bhb":          {role: analyst, partners: [BHB]}
+  "user:mops.sam":             {role: marketing_ops, partners: [SAM]}

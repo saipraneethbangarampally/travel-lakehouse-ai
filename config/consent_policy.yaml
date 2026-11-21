@@ -1,0 +1,20 @@
+# Marketing consent model by member jurisdiction (simplified for the demo; real rules
+# come from Legal/Privacy).
+#
+#   opt_in  -> may email ONLY with an explicit opt-in on record (GDPR / UK GDPR / CASL)
+#   opt_out -> may email unless the member has opted out (CAN-SPAM style)
+#
+# Regardless of model: an opt-out always wins, and a missing/invalid email is never
+# marketable.
+
+default_model: opt_in   # unknown country -> safest option
+jurisdictions:
+  US: opt_out
+  MX: opt_out
+  CA: opt_in
+  GB: opt_in
+  DE: opt_in
+  FR: opt_in
+
+# Tie-break when two consent events share a timestamp: the more restrictive one wins.
+restrictive_first: true

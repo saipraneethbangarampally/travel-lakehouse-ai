@@ -1,0 +1,15 @@
+# core
+pyspark==3.5.3
+pandas>=2.2
+pyarrow>=15
+numpy>=1.26
+scikit-learn>=1.4
+PyYAML>=6.0
+mcp>=1.2
+# dev
+pytest>=8
+ruff>=0.6
+# optional: Delta locally (TLAKE_TABLE_FORMAT=delta), Azure OpenAI for embeddings/answers
+# delta-spark==3.2.1
+# deltalake>=0.18
+# openai>=1.40
