@@ -9,6 +9,8 @@ Reads gold with pandas/pyarrow (the stand-in for the Fabric SQL analytics endpoi
 """
 from __future__ import annotations
 
+from functools import lru_cache
+
 import pandas as pd
 
 from . import audience, governance, settings
@@ -26,9 +28,16 @@ def load(name: str) -> pd.DataFrame:
     path = settings.LAKE / "gold" / name
     if not path.exists():
         raise FileNotFoundError(f"gold table {name} not built yet; run the pipeline")
-    if settings.TABLE_FORMAT == "delta":
+    # cache per table version: any rewrite changes a file mtime, which invalidates the entry
+    stamp = max((f.stat().st_mtime_ns for f in path.rglob("*") if f.is_file()), default=0)
+    return _load_cached(str(path), settings.TABLE_FORMAT, stamp).copy()
+
+
+@lru_cache(maxsize=16)
+def _load_cached(path: str, fmt: str, stamp: int) -> pd.DataFrame:
+    if fmt == "delta":
         from deltalake import DeltaTable
-        df = DeltaTable(str(path)).to_pandas()
+        df = DeltaTable(path).to_pandas()
     else:
         df = pd.read_parquet(path)
     for c in df.columns:  # hive partition columns come back as categoricals

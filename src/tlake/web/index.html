@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Travel Lakehouse</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1b1f24; --muted: #5d6673; --line: #e3e6ea;
+    --accent: #2f6fdf; --ok: #1f8a4c; --warn: #b26a00; --bad: #c2362f; --chip: #eef2f8;
+    --sam: #2f6fdf; --bhb: #11998e; --nwcu: #d9822b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --panel: #171b21; --ink: #e8ebef; --muted: #9aa4b1; --line: #2a3039;
+      --accent: #6b9cff; --ok: #4cc685; --warn: #e0a447; --bad: #ff7a70; --chip: #212833;
+      --sam: #6b9cff; --bhb: #3fc7b9; --nwcu: #f0a65e;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216; --panel: #171b21; --ink: #e8ebef; --muted: #9aa4b1; --line: #2a3039;
+    --accent: #6b9cff; --ok: #4cc685; --warn: #e0a447; --bad: #ff7a70; --chip: #212833;
+    --sam: #6b9cff; --bhb: #3fc7b9; --nwcu: #f0a65e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 14px 16px; }
+  .bar { max-width: 1180px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  h1 { font-size: 18px; margin: 0; margin-right: auto; }
+  h2 { font-size: 15px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+  .grid2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .kpis { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  .kpi .label { color: var(--muted); font-size: 13px; }
+  .kpi .value { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  select, input, button { font: inherit; color: var(--ink); background: var(--panel);
+         border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; }
+  button { background: var(--accent); color: #fff; border-color: var(--accent); cursor: pointer; font-weight: 600; }
+  button:disabled { opacity: .6; cursor: wait; }
+  a { color: var(--accent); }
+  .chip { display: inline-block; background: var(--chip); border-radius: 999px; padding: 2px 10px; font-size: 13px; }
+  .who { font-size: 13px; color: var(--muted); }
+  .callout { border-left: 3px solid var(--accent); padding: 8px 12px; background: var(--chip); border-radius: 6px; font-size: 14px; }
+  .chart { position: relative; height: 280px; }
+  form.aud { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); align-items: end; }
+  form.aud label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  form.aud label.inline { display: flex; gap: 6px; align-items: center; color: var(--ink); font-size: 14px; }
+  .checks { display: flex; flex-wrap: wrap; gap: 8px; }
+  .checks label { display: flex; gap: 4px; align-items: center; color: var(--ink); }
+  .funnel { display: grid; gap: 6px; margin-top: 14px; }
+  .frow { display: grid; grid-template-columns: 210px 1fr 70px; gap: 10px; align-items: center; font-size: 14px; }
+  .ftrack { background: var(--chip); border-radius: 5px; height: 18px; overflow: hidden; }
+  .ffill { height: 100%; border-radius: 5px; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .err { color: var(--bad); font-size: 14px; margin-top: 10px; }
+  .passage { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-top: 10px; }
+  .passage .src { font-size: 12px; color: var(--muted); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row input { flex: 1; min-width: 200px; }
+  @media (max-width: 560px) { .frow { grid-template-columns: 120px 1fr 54px; font-size: 13px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>Travel Lakehouse</h1>
+    <label class="who">Viewing as
+      <select id="principal" aria-label="Principal"></select>
+    </label>
+    <span class="chip" id="fresh">loading…</span>
+    <a href="/docs" target="_blank">API docs ↗</a>
+  </div>
+</header>
+
+<main>
+  <div class="callout" id="scope">Loading who you are…</div>
+
+  <section class="kpis" id="kpis"></section>
+
+  <section class="grid2">
+    <div class="panel">
+      <h2>Gross booking value by product</h2>
+      <p class="sub">Non-cancelled bookings, USD, stacked by partner</p>
+      <div class="chart"><canvas id="gbvProduct"></canvas></div>
+    </div>
+    <div class="panel">
+      <h2>Gross booking value by month</h2>
+      <p class="sub">Last 18 months, one line per partner</p>
+      <div class="chart"><canvas id="gbvMonth"></canvas></div>
+    </div>
+  </section>
+
+  <section class="grid2">
+    <div class="panel">
+      <h2>Email engagement by campaign product</h2>
+      <p class="sub">Open rate and click rate (opens or clicks ÷ sends)</p>
+      <div class="chart"><canvas id="email"></canvas></div>
+    </div>
+    <div class="panel">
+      <h2>Marketable members by country</h2>
+      <p class="sub">People who may receive marketing email right now (consent-aware)</p>
+      <div class="chart"><canvas id="country"></canvas></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Audience builder</h2>
+    <p class="sub">Describe who you want to reach. The platform removes anyone it isn't legally allowed to email and returns counts only, never names.</p>
+    <form class="aud" id="audForm">
+      <label>Partner <select id="aPartner"></select></label>
+      <label>Min cruise affinity (0–1) <input id="aAff" type="number" min="0" max="1" step="0.05" value="0.3"></label>
+      <label>Max days since last booking <input id="aDays" type="number" min="1" step="1" value="730"></label>
+      <label>Value segments
+        <span class="checks" id="aSeg">
+          <label><input type="checkbox" value="LOW">Low</label>
+          <label><input type="checkbox" value="MID" checked>Mid</label>
+          <label><input type="checkbox" value="HIGH" checked>High</label>
+        </span>
+      </label>
+      <label class="inline"><input type="checkbox" id="aUpcoming" checked> Skip members with a trip already booked</label>
+      <button type="submit" id="aBtn">Estimate audience</button>
+    </form>
+    <div class="funnel" id="funnel"></div>
+    <div class="err" id="aErr"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Ask the knowledge base</h2>
+    <p class="sub">Searches brand guidelines and policies you're allowed to see. If nothing relevant exists, it says so instead of guessing.</p>
+    <form class="row" id="kForm">
+      <input id="kQ" value="Can we email members in Germany without an opt-in?" aria-label="Question">
+      <button type="submit" id="kBtn">Search</button>
+    </form>
+    <div id="kOut"></div>
+  </section>
+</main>
+
+<script>
+const PARTNER_COLOR = { SAM: "--sam", BHB: "--bhb", NWCU: "--nwcu" };
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const colorFor = (p) => css(PARTNER_COLOR[p] || "--accent");
+const usd = (v) => v == null ? "hidden" : "$" + (v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : v >= 1e3 ? (v / 1e3).toFixed(0) + "K" : v.toFixed(0));
+const pct = (v) => v == null ? "hidden" : (v * 100).toFixed(1) + "%";
+const charts = {};
+let me = null;
+
+function principal() { return document.getElementById("principal").value; }
+function saveChoice(v) { try { localStorage.setItem("tlake.principal", v); } catch (e) {} }
+function loadChoice() { try { return localStorage.getItem("tlake.principal"); } catch (e) { return null; } }
+
+async function api(path, body) {
+  const opts = { headers: { "X-Principal": principal() } };
+  if (body) { opts.method = "POST"; opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || r.statusText);
+  return data;
+}
+const metric = (m, group_by = [], filters = {}) => api("/api/query", { metric: m, group_by, filters });
+
+function draw(id, config) {
+  if (charts[id]) charts[id].destroy();
+  const ink = css("--muted"), line = css("--line");
+  config.options = Object.assign({ responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: ink } } },
+    scales: { x: { ticks: { color: ink }, grid: { color: line } }, y: { ticks: { color: ink }, grid: { color: line } } } },
+    config.options || {});
+  charts[id] = new Chart(document.getElementById(id), config);
+}
+
+async function loadPrincipals() {
+  const list = await fetch("/api/principals").then(r => r.json());
+  const sel = document.getElementById("principal");
+  sel.innerHTML = list.map(p => `<option value="${p.id}">${p.id} (${p.role}, ${p.partners.join(", ")})</option>`).join("");
+  const saved = loadChoice();
+  if (saved && list.some(p => p.id === saved)) sel.value = saved;
+  sel.onchange = () => { saveChoice(sel.value); refresh(); };
+}
+
+async function refresh() {
+  me = await api("/api/me");
+  const all = me.partners.includes("*");
+  const k = me.policy.min_group_size;
+  document.getElementById("scope").innerHTML =
+    `You are <b>${me.id}</b>, role <b>${me.role}</b>. You can see ${all ? "<b>all partners</b>" : "only <b>" + me.partners.join(", ") + "</b>"}.` +
+    (k ? ` Groups with fewer than ${k} members are hidden so nobody can be singled out.` : "") +
+    ` Switch the identity at the top to see the rules change.`;
+
+  api("/api/freshness").then(f => {
+    document.getElementById("fresh").textContent = `Data as of ${String(f.as_of).slice(0, 10)} · last run ${f.last_run_status}`;
+  }).catch(() => { document.getElementById("fresh").textContent = "Data not built: run make demo"; });
+
+  const partners = all ? ["BHB", "SAM", "NWCU"] : me.partners;
+  document.getElementById("aPartner").innerHTML = ["BHB", "SAM", "NWCU"]
+    .map(p => `<option ${partners.includes(p) ? "" : "data-denied"} value="${p}">${p}${partners.includes(p) ? "" : " (not yours)"}</option>`).join("");
+  document.getElementById("aPartner").value = partners[0];
+
+  await Promise.all([kpis(), gbvProduct(), gbvMonth(), email(), country()]).catch(e => console.error(e));
+}
+
+async function kpis() {
+  const [gbv, bk, canc, mk] = await Promise.all([
+    metric("gross_booking_value_usd"), metric("bookings"), metric("cancellation_rate"), metric("marketable_members")]);
+  const v = (r) => r.rows[0] ? r.rows[0].value : null;
+  const tiles = [["Gross booking value", usd(v(gbv))], ["Bookings", v(bk)?.toLocaleString() ?? "hidden"],
+                 ["Cancellation rate", pct(v(canc))], ["Marketable members", v(mk)?.toLocaleString() ?? "hidden"]];
+  document.getElementById("kpis").innerHTML = tiles.map(([l, val]) =>
+    `<div class="panel kpi"><div class="label">${l}</div><div class="value">${val}</div></div>`).join("");
+}
+
+async function gbvProduct() {
+  const r = await metric("gross_booking_value_usd", ["partner_code", "product_type"]);
+  const products = [...new Set(r.rows.map(x => x.product_type))].sort();
+  const partners = [...new Set(r.rows.map(x => x.partner_code))].sort();
+  draw("gbvProduct", { type: "bar",
+    data: { labels: products, datasets: partners.map(p => ({ label: p, backgroundColor: colorFor(p),
+      data: products.map(pr => (r.rows.find(x => x.partner_code === p && x.product_type === pr) || {}).value ?? 0) })) },
+    options: { scales: { x: { stacked: true, ticks: { color: css("--muted") }, grid: { display: false } },
+                         y: { stacked: true, ticks: { color: css("--muted"), callback: usd }, grid: { color: css("--line") } } },
+               plugins: { legend: { labels: { color: css("--muted") } }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${usd(c.raw)}` } } } } });
+}
+
+async function gbvMonth() {
+  const r = await metric("gross_booking_value_usd", ["partner_code", "booking_month"]);
+  const months = [...new Set(r.rows.map(x => x.booking_month))].sort().slice(-18);
+  const partners = [...new Set(r.rows.map(x => x.partner_code))].sort();
+  draw("gbvMonth", { type: "line",
+    data: { labels: months, datasets: partners.map(p => ({ label: p, borderColor: colorFor(p), backgroundColor: colorFor(p),
+      tension: .3, pointRadius: 2,
+      data: months.map(m => (r.rows.find(x => x.partner_code === p && x.booking_month === m) || {}).value ?? null) })) },
+    options: { scales: { x: { ticks: { color: css("--muted"), maxRotation: 0, autoSkip: true }, grid: { display: false } },
+                         y: { ticks: { color: css("--muted"), callback: usd }, grid: { color: css("--line") } } },
+               plugins: { legend: { labels: { color: css("--muted") } }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${usd(c.raw)}` } } } } });
+}
+
+async function email() {
+  const [o, c] = await Promise.all([metric("email_open_rate", ["campaign_product"]), metric("email_click_rate", ["campaign_product"])]);
+  const prods = o.rows.map(x => x.campaign_product).filter(Boolean).sort();
+  const val = (res, p) => (res.rows.find(x => x.campaign_product === p) || {}).value ?? null;
+  draw("email", { type: "bar",
+    data: { labels: prods, datasets: [
+      { label: "Open rate", backgroundColor: css("--accent"), data: prods.map(p => val(o, p)) },
+      { label: "Click rate", backgroundColor: css("--warn"), data: prods.map(p => val(c, p)) }] },
+    options: { scales: { x: { ticks: { color: css("--muted") }, grid: { display: false } },
+                         y: { ticks: { color: css("--muted"), callback: pct }, grid: { color: css("--line") } } },
+               plugins: { legend: { labels: { color: css("--muted") } }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${pct(c.raw)}` } } } } });
+}
+
+async function country() {
+  const r = await metric("marketable_members", ["country"]);
+  const rows = r.rows.filter(x => x.country).sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+  draw("country", { type: "bar",
+    data: { labels: rows.map(x => x.country + (x.value == null ? " (hidden)" : "")),
+            datasets: [{ label: "Marketable members", backgroundColor: css("--ok"), data: rows.map(x => x.value ?? 0) }] },
+    options: { indexAxis: "y", plugins: { legend: { display: false } },
+               scales: { x: { ticks: { color: css("--muted") }, grid: { color: css("--line") } }, y: { ticks: { color: css("--muted") }, grid: { display: false } } } } });
+}
+
+const REASON = { marketable: "Can be emailed", opted_out: "Opted out", no_opt_in_required_by_jurisdiction: "Needs opt-in (EU / UK / Canada law)" };
+
+document.getElementById("audForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById("aBtn"), err = document.getElementById("aErr"), out = document.getElementById("funnel");
+  btn.disabled = true; err.textContent = ""; out.innerHTML = "";
+  const segs = [...document.querySelectorAll("#aSeg input:checked")].map(x => x.value);
+  const criteria = { min_cruise_affinity: +document.getElementById("aAff").value,
+                     max_days_since_last_booking: +document.getElementById("aDays").value,
+                     exclude_upcoming_trips: document.getElementById("aUpcoming").checked };
+  if (segs.length) criteria.value_segments = segs;
+  try {
+    const r = await api("/api/audience/estimate", { partner_code: document.getElementById("aPartner").value, criteria });
+    const n = (v) => typeof v === "number" ? v : 0;
+    const max = Math.max(1, n(r.matched_criteria));
+    const rows = [["Matched your criteria", r.matched_criteria, css("--accent")],
+                  ...Object.entries(r.suppressed).map(([k, v]) => [REASON[k] || k, v, css("--bad")]),
+                  [REASON.marketable, r.marketable, css("--ok")]];
+    out.innerHTML = rows.map(([label, v, col]) => `<div class="frow"><span>${label}</span>
+      <div class="ftrack"><div class="ffill" style="width:${(n(v) / max * 100).toFixed(1)}%;background:${col}"></div></div>
+      <span class="num">${v}</span></div>`).join("");
+  } catch (ex) {
+    err.textContent = "Blocked: " + ex.message;
+  } finally { btn.disabled = false; }
+};
+
+document.getElementById("kForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById("kBtn"), out = document.getElementById("kOut");
+  btn.disabled = true; out.innerHTML = "";
+  try {
+    const r = await api("/api/knowledge/search?q=" + encodeURIComponent(document.getElementById("kQ").value));
+    if (!r.answer_found) { out.innerHTML = `<p class="sub">I don't know: nothing in the documents you can access covers this.</p>`; return; }
+    out.innerHTML = r.passages.map(p => {
+      const div = document.createElement("div"); div.className = "passage";
+      const src = document.createElement("div"); src.className = "src"; src.textContent = `${p.source} · [${p.citation}] · score ${p.score}`;
+      const txt = document.createElement("div"); txt.textContent = p.untrusted_text;
+      div.append(src, txt); return div.outerHTML;
+    }).join("") + (r.quarantined_passages_withheld ? `<p class="sub">${r.quarantined_passages_withheld} passage(s) withheld: they looked like prompt-injection attempts.</p>` : "");
+  } catch (ex) { out.innerHTML = `<p class="err">${ex.message}</p>`; }
+  finally { btn.disabled = false; }
+};
+
+loadPrincipals().then(refresh);
+</script>
+</body>
+</html>

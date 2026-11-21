@@ -15,6 +15,29 @@ make demo      # ~1 minute: day-1 load, day-2 incremental, audiences, RAG, MCP q
 make test      # 50 tests: end-to-end Spark run + unit tests
 ```
 
+## Dashboard and REST API
+
+After `make demo`, run `make api` (add `TLAKE_TABLE_FORMAT=delta` if you built Delta tables) and open:
+
+* **http://127.0.0.1:8000/**: a visual dashboard with booking value, email engagement, marketable
+  members by country, a consent-aware audience builder and knowledge search. Switch "Viewing as"
+  at the top to see partner isolation and small-group suppression change the results.
+* **http://127.0.0.1:8000/docs**: interactive API docs where you can try every endpoint.
+
+| Endpoint | What it does |
+|---|---|
+| `GET /api/principals`, `GET /api/me` | Identities you can act as, and what your role allows |
+| `GET /api/metrics`, `GET /api/datasets/{name}` | Governed metrics and the columns you may see |
+| `POST /api/query` | A metric, grouped and filtered from an allow-list (no SQL) |
+| `POST /api/audience/estimate` | Audience size after consent suppression; counts only |
+| `GET /api/knowledge/search?q=` | ACL-filtered search over brand and policy docs |
+| `GET /api/freshness` | As-of date, last run and open data-quality issues |
+
+The caller is chosen with the `X-Principal` header. That is a stand-in for real authentication in
+this local demo; in production the principal comes from a verified token. The API calls the same
+`serving` layer as the MCP server, so the same rules apply, and every call is logged to
+`lakehouse/_state/api_audit.jsonl`.
+
 Results from a demo run are in [docs/demo_output.md](docs/demo_output.md), so you can read them without running anything.
 
 ---
