@@ -114,6 +114,10 @@ file_sources:
   marketing_engagement:
     landing: landing/marketing
     format: json
+  # Tealium EventStream (webhook / S3 connector) -> one JSON object per web event
+  tealium_events:
+    landing: landing/tealium
+    format: json
 
 # Streaming source (Event Hubs / Fabric Eventstream in production; a landing folder here)
 streams:

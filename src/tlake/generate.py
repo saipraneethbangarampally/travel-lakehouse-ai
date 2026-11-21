@@ -1,5 +1,5 @@
 """Synthetic source systems that mimic the real problem: three white-label partners, each
-with its own on-prem database and schema, plus marketing-tool exports and a consent stream.
+with its own on-prem database and schema, plus marketing-tool exports, Tealium web events and a consent stream.
 
 Day 1 = initial load. Day 2 = an incremental day with tier changes (SCD2), moves, new
 members, cancellations, late-arriving members, source data fixes and consent opt-outs.
@@ -9,6 +9,7 @@ All people are fictional; emails use reserved example.* domains.
 from __future__ import annotations
 
 import argparse
+import calendar
 import json
 import random
 import sqlite3
@@ -204,6 +205,61 @@ def _engagement(partner, people, rng, start, end, per_person, start_id):
     return events, aid
 
 
+def _epoch_ms(ts: datetime) -> str:
+    return str(calendar.timegm(ts.timetuple()) * 1000)
+
+
+TEALIUM_ACCOUNT = "travelrewards"
+TEALIUM_PROFILE = {"BHB": "bhb-web", "SAM": "sam-web", "NWCU": "nwcu-web"}
+WEB_PRODUCT_WEIGHTS = {"CRUISE": 0.35, "HOTEL": 0.35, "FLIGHT": 0.2, "CAR": 0.1}
+
+
+def _tealium(partner, people, rng, start, end, visits, prefix, anonymous):
+    """Tealium EventStream-style web events (what a webhook / S3 connector delivers).
+
+    Members browse product pages; about half of their events are logged in (and carry
+    customer_email). Some visitors decline personalization in Tealium's consent manager,
+    and a few update email preferences through a Tealium-tagged preference center.
+    """
+    events = []
+    span = int((end - start).total_seconds())
+    prods, weights = list(WEB_PRODUCT_WEIGHTS), list(WEB_PRODUCT_WEIGHTS.values())
+
+    def event(vid, name, ts, cats, email=None, **extra):
+        e = {"tealium_event_id": f"{prefix}{len(events)}", "tealium_account": TEALIUM_ACCOUNT,
+             "tealium_profile": TEALIUM_PROFILE[partner], "tealium_datasource": "web",
+             "tealium_visitor_id": vid, "tealium_event": name, "tealium_timestamp_epoch": _epoch_ms(ts),
+             "consent_categories": cats, **extra}
+        if email:
+            e["customer_email"] = email if rng.random() > 0.1 else f" {email.upper()} "
+        events.append(e)
+
+    for p in people:
+        if rng.random() > 0.6:
+            continue
+        vid = f"{partner.lower()}-v{p['id']:06d}"
+        cats = "analytics,personalization" if rng.random() > 0.2 else "analytics"
+        for _ in range(rng.randint(*visits)):
+            ts = start + timedelta(seconds=rng.randint(0, span))
+            prod = rng.choices(prods, weights)[0]
+            name = rng.choice(["product_view", "product_view", "product_view", "search", "booking_start"])
+            event(vid, name, ts, cats, p["email"] if rng.random() < 0.5 else None,
+                  page_type="product" if name == "product_view" else name, product_category=prod.lower())
+        roll = rng.random()
+        if roll < 0.02:
+            event(vid, "email_preferences_update", start + timedelta(seconds=rng.randint(0, span)), cats,
+                  p["email"], email_marketing_opt_in="false")
+        elif roll < 0.06 and p["country"] in OPT_IN_COUNTRIES:
+            event(vid, "email_preferences_update", start + timedelta(seconds=rng.randint(0, span)), cats,
+                  p["email"], email_marketing_opt_in="true")
+    for i in range(anonymous):
+        ts = start + timedelta(seconds=rng.randint(0, span))
+        prod = rng.choices(prods, weights)[0]
+        event(f"{partner.lower()}-anon{prefix}{i}", "product_view", ts, "analytics,personalization",
+              page_type="product", product_category=prod.lower())
+    return events
+
+
 def _consent_event(eid, partner, email, consent, ts, source):
     return {"event_id": eid, "partner_code": partner, "email": email, "channel": "email",
             "consent": consent, "source": source, "event_ts": ts.strftime("%Y-%m-%dT%H:%M:%SZ")}
@@ -217,7 +273,7 @@ def generate(day: int) -> dict:
     onprem.mkdir(parents=True, exist_ok=True)
     landing = settings.SOURCES / "landing"
     summary = {}
-    all_engagement, consent = [], []
+    all_engagement, consent, web = [], [], []
     aid = 1
     for partner in PARTNER_SHAPE:
         # one RNG per partner so day 2 replays day 1's state exactly
@@ -258,6 +314,9 @@ def generate(day: int) -> dict:
                     "leadEmail": f"prospect{i}@example.com", "activityId": f"P{partner}{i}",
                     "activityType": "send", "activityDate": "2026-10-15T10:00:00Z"} for i in range(25)]
             all_engagement += ev
+            trng = random.Random(f"{SEED}:{partner}:tealium:day1")
+            web += _tealium(partner, [p for p in people if not p["late"]], trng,
+                            REF[1] - timedelta(days=60), REF[1] - timedelta(hours=2), (1, 6), f"T1{partner}", 80)
             for p in people:
                 if p["late"]:
                     continue
@@ -327,6 +386,8 @@ def generate(day: int) -> dict:
             ev, aid = _engagement(partner, rng2.sample(existing, k=len(existing) // 3), rng2,
                                   REF[1], now, (1, 1), 10_000_000 + aid)
             all_engagement += ev
+            trng = random.Random(f"{SEED}:{partner}:tealium:day2")
+            web += _tealium(partner, existing, trng, REF[1], now, (0, 2), f"T2{partner}", 20)
             # consent: a wave of opt-outs, one out-of-order late event, one same-ts conflict
             for p in rng2.sample(existing, k=12):
                 consent.append(_consent_event(f"D{partner}{p['id']}", partner, p["email"], "opt_out",
@@ -342,12 +403,14 @@ def generate(day: int) -> dict:
             consent.append(_consent_event(f"TIEOUT{partner}", partner, tie["email"], "opt_out", tie_ts, "call_center"))
 
     _jsonl(landing / "marketing" / f"engagement_day{day}.jsonl", all_engagement)
+    _jsonl(landing / "tealium" / f"eventstream_day{day}.jsonl", web)
     # the consent stream arrives as several micro-batch files
     for k in range(0, len(consent), 400):
         _jsonl(landing / "consent_events" / f"consent_day{day}_{k // 400:03d}.json", consent[k:k + 400])
     settings.write_state("run_context", {"day": day, "as_of": REF[day].isoformat()})
     summary["engagement_events"] = len(all_engagement)
     summary["consent_events"] = len(consent)
+    summary["tealium_events"] = len(web)
     return summary
 
 

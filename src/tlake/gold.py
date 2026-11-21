@@ -61,6 +61,24 @@ def build() -> dict:
                    F.col("member_key").isNotNull().alias("is_known_member")))
     counts["fact_email_engagement"] = lake.write(eng, "gold", "fact_email_engagement")
 
+    # fact_web_event (Tealium) ---------------------------------------------------------
+    # identity stitching: a visitor who logged in once is that member for all their events
+    if lake.exists("silver", "web_events"):
+        we = lake.read("silver", "web_events")
+    else:
+        we = spark.createDataFrame([], "event_id string, partner_code string, visitor_id string, email_hash string, "
+                                       "event_name string, product_type string, event_ts timestamp, "
+                                       "can_personalize boolean, _batch_id int")
+    stitch = (we.filter(F.col("email_hash").isNotNull()).groupBy("partner_code", "visitor_id")
+                .agg(F.max("email_hash").alias("_stitched")))
+    web = (we.join(stitch, ["partner_code", "visitor_id"], "left")
+             .withColumn("email_hash", F.coalesce("email_hash", "_stitched"))
+             .join(member_by_email, ["partner_code", "email_hash"], "left")
+             .select("event_id", "partner_code", "member_key", "visitor_id", "event_name", "product_type",
+                     "event_ts", F.to_date("event_ts").alias("event_date"), "can_personalize",
+                     F.col("member_key").isNotNull().alias("is_known_member")))
+    counts["fact_web_event"] = lake.write(web, "gold", "fact_web_event")
+
     # member_contactability -----------------------------------------------------------
     pol = settings.consent_cfg()
     juris = F.create_map(*[x for k, v in pol["jurisdictions"].items() for x in (F.lit(k), F.lit(v))])
@@ -100,10 +118,15 @@ def build() -> dict:
         F.sum(F.when((F.col("activity_type") == "click") & (days_ago <= 90), 1).otherwise(0)).alias("email_clicks_90d"),
         F.sum(F.when((F.col("activity_type") == "click") & (F.col("campaign_product") == "CRUISE") & (days_ago <= 180), 1)
               .otherwise(0)).alias("cruise_clicks_180d"))
+    # web behaviour only counts when the visitor allowed personalization in Tealium
+    fw = lake.read("gold", "fact_web_event").filter(
+        F.col("is_known_member") & F.col("can_personalize") & (F.col("event_name") == "product_view")
+        & (F.col("product_type") == "CRUISE") & (F.datediff(ref_lit, F.col("event_date")) <= 30))
+    wv = fw.groupBy("member_key").agg(F.count("*").alias("web_cruise_views_30d"))
     m360 = (current.select("member_key", "partner_code", "tier", "country", "state")
-            .join(bk, "member_key", "left").join(en, "member_key", "left")
+            .join(bk, "member_key", "left").join(en, "member_key", "left").join(wv, "member_key", "left")
             .fillna(0, ["total_bookings", "cruise_bookings", "hotel_bookings", "upcoming_trips",
-                        "email_opens_90d", "email_clicks_90d", "cruise_clicks_180d"])
+                        "email_opens_90d", "email_clicks_90d", "cruise_clicks_180d", "web_cruise_views_30d"])
             .withColumn("lifetime_value_usd", F.coalesce("lifetime_value_usd", F.lit(0).cast("decimal(14,2)")))
             .withColumn("days_since_last_booking", F.datediff(ref_lit, "last_booking_date"))
             .withColumn("cruise_affinity", F.round(

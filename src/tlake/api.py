@@ -23,7 +23,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import audience, governance, serving, settings
+from . import activate, audience, governance, serving, settings
 from .rag import retrieve
 
 WEB = Path(__file__).parent / "web"
@@ -174,6 +174,20 @@ def knowledge_search(q: Annotated[str, Query(min_length=1, max_length=1000, exam
                               "score": r["score"], "untrusted_text": r["text"]} for r in res["results"]],
                 "quarantined_passages_withheld": res["quarantined_chunks_skipped"]}
     return _run(who, "knowledge_search", {"q": q}, run)
+
+
+@app.get("/api/integrations", tags=["automations"])
+def integrations(who: Who) -> dict:
+    """Marketo and Tealium connection mode, and recent activations (counts only)."""
+    cfg = settings.integrations_cfg()
+    mk_live = all(os.environ.get(v) for v in ("MARKETO_BASE_URL", "MARKETO_CLIENT_ID", "MARKETO_CLIENT_SECRET"))
+    tl_live = bool(os.environ.get("TEALIUM_DATASOURCE_KEY"))
+    lists = {c: i for c, i in cfg["marketo"]["lists"].items() if who.can_see_partner(c.split("-")[0])}
+    profiles = {p: v for p, v in cfg["tealium"]["profiles"].items() if who.can_see_partner(p)}
+    return _run(who, "integrations", {}, lambda: {
+        "marketo": {"mode": "live" if mk_live else "dry-run", "lists": lists},
+        "tealium": {"mode": "live" if tl_live else "dry-run", "account": cfg["tealium"]["account"], "profiles": profiles},
+        "recent_activations": activate.recent(who)})
 
 
 def main() -> None:

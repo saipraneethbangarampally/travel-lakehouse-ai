@@ -1,0 +1,36 @@
+# Marketing-technology integrations.
+#
+# Inbound:  Tealium EventStream -> landing/tealium -> bronze/silver/gold (fact_web_event)
+#           Marketo activities  -> landing/marketing (email engagement + unsubscribes)
+# Outbound: consented audiences -> Marketo static lists, Tealium audience flags
+#
+# Secrets never live in this file or in git. Live mode reads them from environment
+# variables; without them every sync runs as a DRY RUN that records the exact requests
+# it would send to exports/integrations/ and changes nothing anywhere.
+
+marketo:
+  # env: MARKETO_BASE_URL (e.g. https://123-ABC-456.mktorest.com),
+  #      MARKETO_CLIENT_ID, MARKETO_CLIENT_SECRET
+  batch_size: 300              # Marketo REST limit for leads and list membership calls
+  lookup_field: email
+  # campaign -> Marketo static list id (create the lists in Marketo first)
+  lists:
+    SAM-CRZ-CARIB-27Q1: 1001
+    BHB-CRZ-ALASKA-27Q2: 1002
+  # canonical column -> Marketo lead field
+  lead_fields:
+    email: email
+    first_name: firstName
+    partner_code: partnerCode   # custom field in Marketo
+  sync_unsubscribes: true       # push opt-outs from the lakehouse so Marketo can't email them
+
+tealium:
+  account: travelrewards
+  # partner -> Tealium profile (also used to map inbound events to a partner)
+  profiles:
+    BHB: bhb-web
+    SAM: sam-web
+    NWCU: nwcu-web
+  # env: TEALIUM_DATASOURCE_KEY (the HTTP API data source key)
+  collect_url: https://collect.tealiumiq.com/event
+  audience_event: lakehouse_audience_qualified

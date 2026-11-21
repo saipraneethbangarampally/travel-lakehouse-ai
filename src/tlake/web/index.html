@@ -60,6 +60,9 @@
   .passage { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-top: 10px; }
   .passage .src { font-size: 12px; color: var(--muted); }
   .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  table.acts { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.acts th, table.acts td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  table.acts td.n { text-align: right; font-variant-numeric: tabular-nums; }
   .row input { flex: 1; min-width: 200px; }
   @media (max-width: 560px) { .frow { grid-template-columns: 120px 1fr 54px; font-size: 13px; } }
 </style>
@@ -104,6 +107,19 @@
       <h2>Marketable members by country</h2>
       <p class="sub">People who may receive marketing email right now (consent-aware)</p>
       <div class="chart"><canvas id="country"></canvas></div>
+    </div>
+  </section>
+
+  <section class="grid2">
+    <div class="panel">
+      <h2>Website behaviour (Tealium)</h2>
+      <p class="sub">Product-page views from Tealium EventStream, stacked by partner</p>
+      <div class="chart"><canvas id="web"></canvas></div>
+    </div>
+    <div class="panel">
+      <h2>Automations: Marketo + Tealium</h2>
+      <p class="sub" id="intMode">Loading…</p>
+      <div id="acts"></div>
     </div>
   </section>
 
@@ -199,7 +215,7 @@ async function refresh() {
     .map(p => `<option ${partners.includes(p) ? "" : "data-denied"} value="${p}">${p}${partners.includes(p) ? "" : " (not yours)"}</option>`).join("");
   document.getElementById("aPartner").value = partners[0];
 
-  await Promise.all([kpis(), gbvProduct(), gbvMonth(), email(), country()]).catch(e => console.error(e));
+  await Promise.all([kpis(), gbvProduct(), gbvMonth(), email(), country(), web(), automations()]).catch(e => console.error(e));
 }
 
 async function kpis() {
@@ -258,6 +274,33 @@ async function country() {
             datasets: [{ label: "Marketable members", backgroundColor: css("--ok"), data: rows.map(x => x.value ?? 0) }] },
     options: { indexAxis: "y", plugins: { legend: { display: false } },
                scales: { x: { ticks: { color: css("--muted") }, grid: { color: css("--line") } }, y: { ticks: { color: css("--muted") }, grid: { display: false } } } } });
+}
+
+async function web() {
+  const r = await metric("web_product_views", ["partner_code", "product_type"]);
+  const products = [...new Set(r.rows.map(x => x.product_type))].filter(Boolean).sort();
+  const partners = [...new Set(r.rows.map(x => x.partner_code))].sort();
+  draw("web", { type: "bar",
+    data: { labels: products, datasets: partners.map(p => ({ label: p, backgroundColor: colorFor(p),
+      data: products.map(pr => (r.rows.find(x => x.partner_code === p && x.product_type === pr) || {}).value ?? 0) })) },
+    options: { scales: { x: { stacked: true, ticks: { color: css("--muted") }, grid: { display: false } },
+                         y: { stacked: true, ticks: { color: css("--muted") }, grid: { color: css("--line") } } },
+               plugins: { legend: { labels: { color: css("--muted") } } } } });
+}
+
+async function automations() {
+  const r = await api("/api/integrations");
+  document.getElementById("intMode").textContent =
+    `Marketo: ${r.marketo.mode} · Tealium: ${r.tealium.mode}. Run "make activate" to sync a consented audience.`;
+  const box = document.getElementById("acts");
+  if (!r.recent_activations.length) { box.innerHTML = `<p class="sub">No activations yet for the partners you can see.</p>`; return; }
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  box.innerHTML = `<table class="acts"><thead><tr><th>Campaign</th><th>Mode</th><th class="n">Consented</th>
+    <th class="n">Added</th><th class="n">Removed</th><th class="n">Tealium</th></tr></thead><tbody>` +
+    r.recent_activations.map(a => `<tr><td>${esc(a.campaign_id)}<div class="sub" style="margin:0">${esc(String(a.finished_at).slice(0, 16).replace("T", " "))}</div></td>
+      <td>${esc(a.mode)}</td><td class="n">${esc(a.consented_rows)}</td>
+      <td class="n">${esc(a.marketo_list?.added_to_list)}</td><td class="n">${esc(a.marketo_list?.removed_from_list)}</td>
+      <td class="n">${esc(a.tealium?.events_sent)}</td></tr>`).join("") + "</tbody></table>";
 }
 
 const REASON = { marketable: "Can be emailed", opted_out: "Opted out", no_opt_in_required_by_jurisdiction: "Needs opt-in (EU / UK / Canada law)" };

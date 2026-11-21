@@ -38,6 +38,10 @@ def quality_cfg() -> dict:
     return load_yaml("quality.yaml")
 
 
+def integrations_cfg() -> dict:
+    return load_yaml("integrations.yaml")
+
+
 def consent_cfg() -> dict:
     return load_yaml("consent_policy.yaml")
 

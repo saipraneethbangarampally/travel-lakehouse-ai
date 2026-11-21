@@ -38,6 +38,30 @@ this local demo; in production the principal comes from a verified token. The AP
 `serving` layer as the MCP server, so the same rules apply, and every call is logged to
 `lakehouse/_state/api_audit.jsonl`.
 
+## Marketing technology: Tealium and Adobe Marketo
+
+| Direction | What happens | Where |
+|---|---|---|
+| Tealium -> lakehouse | EventStream web events (product views, searches, booking starts) land as files, go through bronze like any other source, and become `silver.web_events` with the email hashed. Visitors who logged in once are stitched to the member for all their visits (`gold.fact_web_event`). | `silver.build_web_events`, `gold.py` |
+| Tealium consent | Cookie choices from Tealium's consent manager are kept as `can_personalize`; a visitor who declined personalization never feeds `member_360.web_cruise_views_30d`. Email-preference changes made on the website become consent events (opt-outs still win). | same |
+| Lakehouse -> Marketo | `make activate` re-checks consent, pushes every opt-out as `unsubscribed=true`, then **syncs** the campaign's static list to exactly the consented audience: new people are added, people who left (for example they opted out) are removed. | `src/tlake/integrations/marketo.py` |
+| Lakehouse -> Tealium | Each audience member is sent to Tealium Collect as an event carrying only a SHA-256 of the email, so the website can personalise for the same people. | `src/tlake/integrations/tealium.py` |
+
+```
+make activate                                                                  # dry run
+python -m tlake.activate SAM-CRZ-CARIB-27Q1 --principal user:mops.sam --live   # real APIs
+```
+
+Without credentials every activation is a **dry run**: it records the exact HTTP requests it
+would send in `exports/integrations/` and keeps simulated list membership, so you can watch
+additions and removals between runs. For live mode set `MARKETO_BASE_URL`, `MARKETO_CLIENT_ID`,
+`MARKETO_CLIENT_SECRET` and `TEALIUM_DATASOURCE_KEY` as environment variables (never in files),
+create the static lists in Marketo and put their ids in `config/integrations.yaml`, and add a
+`partnerCode` custom field in Marketo (or remove it from `lead_fields`). The Marketo client
+refreshes expired tokens, retries rate limits (606/615/604) with backoff and reports skipped
+leads. It is tested against a fake Marketo API, not a real instance, so do one supervised live
+run before scheduling it.
+
 Results from a demo run are in [docs/demo_output.md](docs/demo_output.md), so you can read them without running anything.
 
 ---
@@ -64,6 +88,7 @@ flowchart LR
     A3[(NWCU SQL DB)]:::src
     M[Marketing tool<br/>activity export]:::src
     C>Consent events<br/>preference center]:::src
+    T>Tealium EventStream<br/>web events + consent]:::src
   end
   subgraph Lakehouse
     B[Bronze<br/>raw strings, append-only,<br/>lineage columns]
@@ -73,11 +98,14 @@ flowchart LR
   SEM{{semantic_model.yaml<br/>descriptions · PII tags · metrics · roles}}
   A1 & A2 & A3 -->|watermark >= last| B
   M -->|file manifest| B
+  T -->|file manifest| B
   C -->|Structured Streaming| S
   B --> S --> G
   SEM -.-> G
   G --> PBI[Power BI<br/>semantic model]
   G --> AUD[Audience builder<br/>consent-aware] --> EXP[Activation export<br/>marketing_ops only]
+  EXP --> MKTO[Adobe Marketo<br/>list sync + unsubscribes]
+  EXP --> TQ[Tealium<br/>hashed audience events]
   G --> MCP[MCP server<br/>governed metric tools]
   K[Knowledge docs] --> RAG[RAG index<br/>redact · ACL · quarantine] --> MCP
   MCP --> LLM[Copilot / Claude / Cursor]

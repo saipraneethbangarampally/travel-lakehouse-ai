@@ -41,7 +41,30 @@ def spark() -> SparkSession:
         builder = configure_spark_with_delta_pip(builder)
     _spark = builder.getOrCreate()
     _spark.sparkContext.setLogLevel("ERROR")
+    _start_callback_server(_spark)
     return _spark
+
+
+def _start_callback_server(session: SparkSession) -> None:
+    """Start py4j's callback server (needed by foreachBatch) before PySpark does.
+
+    PySpark reads the port with socket.getsockname() right after start(), while py4j's
+    listener thread is still calling listen(). On WSL1 that race fails with
+    `OSError: [Errno 22]`, so do the same setup but use the port py4j recorded at bind time.
+    """
+    from py4j.java_gateway import JavaObject
+
+    gw = session.sparkContext._gateway
+    if gw.__dict__.get("_callback_server") is not None:
+        return
+    p = gw.callback_server_parameters
+    p.eager_load, p.daemonize, p.daemonize_connections, p.port = True, True, True, 0
+    gw.start_callback_server(p)
+    port = gw._callback_server.get_listening_port()
+    gw._callback_server.port = port
+    gw._python_proxy_port = port
+    jgws = JavaObject("GATEWAY_SERVER", gw._gateway_client)
+    jgws.resetCallbackClient(jgws.getCallbackClient().getAddress(), port)
 
 
 def path(layer: str, name: str) -> str:

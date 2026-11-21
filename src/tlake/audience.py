@@ -32,6 +32,7 @@ CRITERIA = {  # key -> (column, op, expected python type)
     "tiers": ("tier", "in", list),
     "countries": ("country", "in", list),
     "exclude_upcoming_trips": ("upcoming_trips", "==0", bool),
+    "min_web_cruise_views_30d": ("web_cruise_views_30d", ">=", int),
 }
 OPS = {">=": operator.ge, "<=": operator.le}
 

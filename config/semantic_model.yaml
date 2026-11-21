@@ -46,6 +46,7 @@ datasets:
       email_opens_90d:         {type: int, classification: internal, description: Email opens in the last 90 days.}
       email_clicks_90d:        {type: int, classification: internal, description: Email clicks in the last 90 days.}
       cruise_clicks_180d:      {type: int, classification: internal, description: Clicks on cruise campaigns in the last 180 days.}
+      web_cruise_views_30d:    {type: int, classification: internal, description: Cruise product-page views on the website in the last 30 days (Tealium; only visitors who allowed personalization).}
       cruise_affinity:         {type: double, classification: internal, description: "0-1 explainable score: 0.5 x cruise history + 0.3 x recent cruise clicks + 0.2 x booked in last year."}
       value_segment:           {type: string, classification: internal, description: "LTV band: HIGH >= $8k, MID >= $2.5k, LOW otherwise."}
       is_email_marketable:     {type: boolean, classification: internal, description: Consent decision from member_contactability.}
@@ -65,6 +66,22 @@ datasets:
       activity_ts:      {type: timestamp, classification: internal, description: Event time (UTC).}
       activity_date:    {type: date, classification: internal, description: Event date (UTC).}
       is_known_member:  {type: boolean, classification: internal, description: True when the email matched a current member.}
+
+  fact_web_event:
+    description: Website behaviour from Tealium EventStream (product views, searches, booking starts), stitched to members who logged in.
+    grain: web event
+    ai_exposed: true
+    columns:
+      event_id:        {type: string, classification: internal, description: Tealium event id.}
+      partner_code:    {type: string, classification: internal, description: Partner brand (from the Tealium profile).}
+      member_key:      {type: string, classification: confidential, description: Pseudonymous member id (null for anonymous visitors).}
+      visitor_id:      {type: string, classification: confidential, description: Tealium visitor (cookie) id; personal data under GDPR.}
+      event_name:      {type: string, classification: internal, description: "product_view, search, booking_start or email_preferences_update."}
+      product_type:    {type: string, classification: internal, description: Product the page is about.}
+      event_ts:        {type: timestamp, classification: internal, description: Event time (UTC).}
+      event_date:      {type: date, classification: internal, description: Event date (UTC).}
+      can_personalize: {type: boolean, classification: internal, description: Visitor allowed personalization in Tealium consent manager.}
+      is_known_member: {type: boolean, classification: internal, description: True when the visitor was stitched to a current member.}
 
   member_contactability:
     description: Per-member email consent decision with the reason a member is suppressed.
@@ -147,12 +164,28 @@ metrics:
     agg: ratio
     numerator_where: "activity_type == 'click'"
     denominator_where: "activity_type == 'send'"
+  web_product_views:
+    description: Product-page views on partner websites (Tealium).
+    dataset: fact_web_event
+    agg: count
+    where: "event_name == 'product_view'"
+  web_booking_starts:
+    description: Times a visitor started a booking on the website (Tealium).
+    dataset: fact_web_event
+    agg: count
+    where: "event_name == 'booking_start'"
+  web_known_visitor_share:
+    description: Share of web events stitched to a known member.
+    dataset: fact_web_event
+    agg: ratio
+    numerator_where: "is_known_member == True"
 
 # Dimensions an agent may group or filter by (derived ones are computed by the server).
 dimensions:
   fact_booking: [partner_code, product_type, destination, tier_at_booking, status, booking_month, booking_year]
   member_360: [partner_code, tier, country, value_segment]
   fact_email_engagement: [partner_code, campaign_id, campaign_product, activity_month]
+  fact_web_event: [partner_code, event_name, product_type, event_month]
 
 roles:
   analyst:

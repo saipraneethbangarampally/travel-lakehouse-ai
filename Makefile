@@ -1,7 +1,7 @@
 export PYTHONPATH := src
 PY ?= python
 
-.PHONY: setup demo test lint mcp api fabric-sql clean
+.PHONY: setup demo test lint mcp api activate fabric-sql clean
 
 setup:          ## install dependencies (needs Java 17+ for Spark)
 	$(PY) -m pip install -r requirements.txt && $(PY) -m pip install -e .
@@ -20,6 +20,9 @@ mcp:            ## start the MCP server on stdio
 
 api:            ## dashboard + REST API on http://127.0.0.1:8000 (docs at /docs)
 	$(PY) -m tlake.api
+
+activate:       ## sync SAM's consented audience to Marketo + Tealium (dry run unless --live and credentials)
+	$(PY) -m tlake.activate SAM-CRZ-CARIB-27Q1 --principal user:mops.sam
 
 fabric-sql:     ## regenerate masking/RLS T-SQL from the semantic model
 	$(PY) -m tlake.governance > docs/generated/fabric_security.sql

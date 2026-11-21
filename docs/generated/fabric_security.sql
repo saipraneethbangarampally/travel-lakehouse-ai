@@ -23,6 +23,7 @@ CREATE SECURITY POLICY security.partner_isolation
     ADD FILTER PREDICATE security.fn_partner_predicate(partner_code) ON gold.fact_booking,
     ADD FILTER PREDICATE security.fn_partner_predicate(partner_code) ON gold.member_360,
     ADD FILTER PREDICATE security.fn_partner_predicate(partner_code) ON gold.fact_email_engagement,
+    ADD FILTER PREDICATE security.fn_partner_predicate(partner_code) ON gold.fact_web_event,
     ADD FILTER PREDICATE security.fn_partner_predicate(partner_code) ON gold.member_contactability,
     ADD FILTER PREDICATE security.fn_partner_predicate(partner_code) ON gold.dim_member
     WITH (STATE = ON);
@@ -31,5 +32,6 @@ CREATE SECURITY POLICY security.partner_isolation
 --   gold.fact_booking: Confidential
 --   gold.member_360: Confidential
 --   gold.fact_email_engagement: Confidential
+--   gold.fact_web_event: Confidential
 --   gold.member_contactability: Confidential
 --   gold.dim_member: Highly Confidential - Personal Data

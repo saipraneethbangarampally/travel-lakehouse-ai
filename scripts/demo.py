@@ -19,7 +19,7 @@ os.environ.setdefault("TZ", "UTC")
 if hasattr(time, "tzset"):
     time.tzset()
 
-from tlake import audience, generate, governance, mcp_server, pipeline, settings  # noqa: E402
+from tlake import activate, audience, generate, governance, mcp_server, pipeline, settings  # noqa: E402
 from tlake.rag import ingest, retrieve  # noqa: E402
 
 out: list[str] = []
@@ -64,6 +64,12 @@ def main():
     except governance.AccessDenied as e:
         say(f"Analyst attempt -> `AccessDenied: {e}`\n")
 
+    say("## 4b. Automations: sync the consented audience to Marketo and Tealium (dry run)")
+    say("Opt-outs are pushed to Marketo as `unsubscribed`, the static list is synced to exactly the consented "
+        "audience, and Tealium gets each member as a hashed-email audience event. Without credentials "
+        "nothing leaves the machine; the exact requests are written to `exports/integrations/`.\n")
+    block(activate.activate("SAM-CRZ-CARIB-27Q1", "user:mops.sam"))
+
     say("## 5. RAG index over brand guidelines and policy docs")
     block(ingest.build_index())
 
@@ -73,6 +79,7 @@ def main():
         ("data_freshness", {}),
         ("query_metric", {"metric": "gross_booking_value_usd", "group_by": ["partner_code", "product_type"]}),
         ("query_metric", {"metric": "email_click_rate", "group_by": ["campaign_product"]}),
+        ("query_metric", {"metric": "web_product_views", "group_by": ["partner_code", "product_type"]}),
         ("estimate_audience", {"partner_code": "SAM", "criteria": {"min_cruise_affinity": 0.3, "countries": ["DE", "FR", "GB"]}}),
         ("describe_dataset", {"name": "dim_member"}),
         ("search_knowledge", {"question": "Can we email members in Germany without an opt-in?"}),

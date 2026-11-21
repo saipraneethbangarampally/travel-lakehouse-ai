@@ -5,6 +5,8 @@
 * bookings  -> latest version per booking (cancellations update in place), amounts in USD,
                orphans (booking before its member arrived) quarantined and RETRIED each run
 * engagement-> Marketo-style activity, email hashed on the way in (raw email stops at bronze)
+* web events-> Tealium EventStream; email hashed, cookie consent kept as can_personalize,
+               preference-center updates become consent events
 
 Every step only processes bronze batches it has not seen yet (incremental), and every
 write is idempotent, so re-running a batch changes nothing.
@@ -218,5 +220,53 @@ def build_engagement(batch_id: int) -> dict:
     return {"entity": "engagement", "incoming": ev.count(), "silver_rows": n}
 
 
+# ------------------------------------------------------------------------- web events -
+
+def _col_or_null(df: DataFrame, name: str):
+    return F.col(name) if name in df.columns else F.lit(None).cast("string")
+
+
+def build_web_events(batch_id: int) -> dict:
+    """Tealium web events -> silver.web_events (+ preference-center consent events)."""
+    since = _progress().get("web_events", 0)
+    if not lake.exists("bronze", "tealium_events"):
+        return {"entity": "web_events", "incoming": 0}
+    raw = lake.read("bronze", "tealium_events").filter(F.col("_batch_id") > since)
+    if raw.isEmpty():
+        return {"entity": "web_events", "incoming": 0}
+    profiles = settings.integrations_cfg()["tealium"]["profiles"]
+    to_partner = F.create_map(*[x for code, prof in profiles.items() for x in (F.lit(prof), F.lit(code))])
+    ev = raw.select(
+        F.col("tealium_event_id").alias("event_id"),
+        to_partner[F.col("tealium_profile")].alias("partner_code"),
+        F.col("tealium_visitor_id").alias("visitor_id"),
+        lake.hash_email(_col_or_null(raw, "customer_email")).alias("email_hash"),   # raw email dropped here
+        F.lower("tealium_event").alias("event_name"),
+        F.upper(_col_or_null(raw, "product_category")).alias("product_type"),
+        (F.col("tealium_timestamp_epoch").cast("long") / 1000).cast("timestamp").alias("event_ts"),
+        F.array_contains(F.split(F.coalesce(F.col("consent_categories"), F.lit("")), ","), "personalization")
+         .alias("can_personalize"),
+        F.lower(_col_or_null(raw, "email_marketing_opt_in")).alias("_email_opt_in"),
+        "_batch_id",
+    )
+    unknown = ev.filter(F.col("partner_code").isNull()).count()   # profile not mapped to a partner
+    ev = ev.filter(F.col("partner_code").isNotNull())
+    n = lake.upsert("silver", "web_events", ev.drop("_email_opt_in"), ["event_id"], [F.col("_batch_id").desc()])
+
+    # an email-preference change made on the website is a consent event like any other
+    from .consent import apply_consent_events
+    prefs = (ev.filter("event_name = 'email_preferences_update' AND email_hash IS NOT NULL "
+                       "AND _email_opt_in IN ('true', 'false')")
+               .select(F.concat(F.lit("TEAL-"), "event_id").alias("event_id"), "partner_code", "email_hash",
+                       F.lit("email").alias("channel"),
+                       F.when(F.col("_email_opt_in") == "true", "opt_in").otherwise("opt_out").alias("consent"),
+                       F.lit("tealium_preference_center").alias("source"), "event_ts"))
+    apply_consent_events(prefs, batch_id)
+    _save_progress("web_events", batch_id)
+    return {"entity": "web_events", "incoming": ev.count(), "silver_rows": n,
+            "unmapped_profile_rows": unknown, "consent_updates": prefs.count()}
+
+
 def run(batch_id: int) -> list[dict]:
-    return [build_members(batch_id), build_bookings(batch_id), build_engagement(batch_id)]
+    return [build_members(batch_id), build_bookings(batch_id), build_engagement(batch_id),
+            build_web_events(batch_id)]

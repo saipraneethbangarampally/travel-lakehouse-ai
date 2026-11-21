@@ -52,6 +52,8 @@ def _with_derived(df: pd.DataFrame, dataset: str) -> pd.DataFrame:
         df = df.assign(booking_month=d.dt.strftime("%Y-%m"), booking_year=d.dt.year.astype(str))
     if dataset == "fact_email_engagement":
         df = df.assign(activity_month=pd.to_datetime(df["activity_date"]).dt.strftime("%Y-%m"))
+    if dataset == "fact_web_event":
+        df = df.assign(event_month=pd.to_datetime(df["event_date"]).dt.strftime("%Y-%m"))
     return df
 
 
