@@ -192,7 +192,8 @@ async function loadPrincipals() {
   const list = await fetch("/api/principals").then(r => r.json());
   const sel = document.getElementById("principal");
   sel.innerHTML = list.map(p => `<option value="${p.id}">${p.id} (${p.role}, ${p.partners.join(", ")})</option>`).join("");
-  const saved = loadChoice();
+  const asParam = new URLSearchParams(location.search).get("as");
+  const saved = asParam || loadChoice();
   if (saved && list.some(p => p.id === saved)) sel.value = saved;
   sel.onchange = () => { saveChoice(sel.value); refresh(); };
 }
@@ -216,6 +217,9 @@ async function refresh() {
   document.getElementById("aPartner").value = partners[0];
 
   await Promise.all([kpis(), gbvProduct(), gbvMonth(), email(), country(), web(), automations()]).catch(e => console.error(e));
+  // show example results straight away so the page explains itself
+  document.getElementById("aBtn").click();
+  document.getElementById("kBtn").click();
 }
 
 async function kpis() {

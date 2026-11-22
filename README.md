@@ -11,8 +11,8 @@ synthetic: the partners, members and emails are fictional.
 
 ```
 make setup     # Python 3.10+ and Java 17+
-make demo      # ~1 minute: day-1 load, day-2 incremental, audiences, RAG, MCP queries
-make test      # 50 tests: end-to-end Spark run + unit tests
+make demo      # a few minutes: day-1 load, day-2 incremental, audiences, Marketo/Tealium sync, RAG, MCP
+make test      # 68 tests: end-to-end Spark run + unit tests
 ```
 
 ## Dashboard and REST API
